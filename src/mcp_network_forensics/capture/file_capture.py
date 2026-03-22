@@ -153,19 +153,56 @@ class FileCaptureManager:
     def get_total_packets(self) -> int:
         """Get total number of packets in file.
         
+        Uses tshark -q -z io,phs for fast counting.
+        
         Returns:
             Total packet count
         """
         if self._total_packets is None:
             try:
-                cap = self._get_capture()
-                # Force load all packets to get count
-                cap.load_packets()
-                self._total_packets = len(cap)
+                # Use tshark to quickly count packets
+                cmd = [
+                    self.tshark_path or "tshark",
+                    "-r", str(self.file_path),
+                    "-q",
+                    "-z", "io,phs"
+                ]
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=30
+                )
+                
+                if result.returncode == 0:
+                    # Parse output to find total packets
+                    for line in result.stdout.split('\n'):
+                        if 'frames' in line.lower() and 'bytes' in line.lower():
+                            # Extract number from line like "frames:1234 bytes:5678"
+                            parts = line.split()
+                            for part in parts:
+                                if 'frames:' in part:
+                                    self._total_packets = int(part.split(':')[1])
+                                    break
+                            break
+                    else:
+                        # Fallback: count manually
+                        self._total_packets = self._count_packets_manual()
+                else:
+                    # Fallback: count manually
+                    self._total_packets = self._count_packets_manual()
+                    
             except Exception as e:
                 logger.error(f"Error counting packets: {e}")
                 self._total_packets = 0
         return self._total_packets
+    
+    def _count_packets_manual(self) -> int:
+        """Fallback: count packets by iterating."""
+        count = 0
+        try:
+            for _ in self.iter_packets():
+                count += 1
+        except Exception as e:
+            logger.error(f"Error in manual counting: {e}")
+        return count
     
     def get_packet(self, index: int) -> Optional[pyshark.Packet]:
         """Get packet at specific index.
