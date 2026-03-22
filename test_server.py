@@ -1,8 +1,16 @@
 """Test script for MCP Network Forensics Server."""
 
+import asyncio
 import json
 import sys
 from pathlib import Path
+
+# Setup event loop for Windows
+try:
+    asyncio.get_running_loop()
+except RuntimeError:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))

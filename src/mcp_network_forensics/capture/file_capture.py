@@ -2,6 +2,9 @@
 
 import asyncio
 import logging
+import os
+import shutil
+import subprocess
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator, Iterator, List, Optional
@@ -21,21 +24,80 @@ def _ensure_event_loop():
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        # No event loop in this thread, create one
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+
+
+def auto_detect_tshark_path() -> Optional[str]:
+    """Auto-detect tshark path from common locations.
+    
+    Returns:
+        Path to tshark executable or None if not found
+    """
+    # 1. Check environment variable
+    env_path = os.environ.get("TSHARK_PATH")
+    if env_path and Path(env_path).exists():
+        logger.info(f"Found tshark via TSHARK_PATH env: {env_path}")
+        return env_path
+    
+    # 2. Check config
+    if config.tshark_path and Path(config.tshark_path).exists():
+        logger.info(f"Found tshark via config: {config.tshark_path}")
+        return config.tshark_path
+    
+    # 3. Try 'where' on Windows or 'which' on Unix
+    try:
+        cmd = "where tshark" if os.name == "nt" else "which tshark"
+        result = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            path = result.stdout.strip().split('\n')[0]
+            logger.info(f"Found tshark via {cmd}: {path}")
+            return path
+    except Exception:
+        pass
+    
+    # 4. Check common Windows installation paths
+    if os.name == "nt":
+        common_paths = [
+            r"C:\Program Files\Wireshark\tshark.exe",
+            r"C:\Program Files (x86)\Wireshark\tshark.exe",
+            r"C:\Users\Administrator\scoop\shims\tshark.exe",
+        ]
+        for path in common_paths:
+            if Path(path).exists():
+                logger.info(f"Found tshark at common path: {path}")
+                return path
+    
+    # 5. Try 'tshark' directly (if in PATH)
+    if shutil.which("tshark"):
+        logger.info("Found tshark in PATH")
+        return "tshark"
+    
+    return None
 
 
 class FileCaptureManager:
     """Manager for file-based packet capture."""
     
-    def __init__(self, file_path: str):
+    def __init__(self, file_path: str, tshark_path: Optional[str] = None):
         """Initialize file capture manager.
         
         Args:
             file_path: Path to PCAP file
+            tshark_path: Optional path to tshark executable (auto-detected if not provided)
         """
         self.file_path = Path(file_path)
+        
+        # Auto-detect tshark path if not provided
+        if tshark_path:
+            self.tshark_path = tshark_path
+        elif config.tshark_path:
+            self.tshark_path = config.tshark_path
+        else:
+            self.tshark_path = auto_detect_tshark_path()
+        
         self._capture: Optional[pyshark.FileCapture] = None
         self._total_packets: Optional[int] = None
     
@@ -50,19 +112,25 @@ class FileCaptureManager:
     
     def open(self) -> None:
         """Open the capture file."""
+        if self.tshark_path is None:
+            raise TsharkNotFoundError(
+                "tshark not found. Please install Wireshark or set TSHARK_PATH environment variable."
+            )
+        
         try:
-            # Ensure event loop exists
             _ensure_event_loop()
             
             self._capture = pyshark.FileCapture(
                 str(self.file_path),
                 keep_packets=config.keep_packets,
-                tshark_path=config.tshark_path,
+                tshark_path=self.tshark_path,
             )
-            logger.info(f"Opened capture file: {self.file_path}")
+            logger.info(f"Opened capture file: {self.file_path} (tshark: {self.tshark_path})")
         except Exception as e:
-            if "tshark" in str(e).lower():
-                raise TsharkNotFoundError("tshark not found. Please install Wireshark.")
+            if "tshark" in str(e).lower() or "not found" in str(e).lower():
+                raise TsharkNotFoundError(
+                    f"tshark not found. Please install Wireshark. Error: {e}"
+                )
             raise CaptureError(f"Failed to open capture file: {e}")
     
     def close(self) -> None:
