@@ -2,6 +2,8 @@
 
 import json
 import logging
+import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -17,7 +19,6 @@ def get_tshark_path() -> str:
     if config.tshark_path:
         return config.tshark_path
     
-    import shutil
     path = shutil.which("tshark")
     if path:
         return path
@@ -56,11 +57,17 @@ def run_tshark(
     logger.debug(f"Running: {' '.join(cmd)}")
     
     try:
+        # Windows-specific flags to prevent console window
+        kwargs = {}
+        if os.name == 'nt':
+            kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+        
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=timeout
+            timeout=timeout,
+            **kwargs
         )
         return result.stdout, result.stderr, result.returncode
     except subprocess.TimeoutExpired:
