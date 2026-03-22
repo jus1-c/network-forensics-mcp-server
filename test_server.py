@@ -136,7 +136,7 @@ def test_packet_details():
                 if detail.layers:
                     print("  Layer Names:")
                     for layer in detail.layers[:3]:  # Show first 3 layers
-                        print(f"    - {layer.get('name', 'Unknown')}")
+                        print(f"    - {layer.layer_name}")
             else:
                 print("No packet found at index 0")
         

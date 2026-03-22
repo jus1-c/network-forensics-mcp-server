@@ -28,7 +28,8 @@ class FileCaptureManager:
         
         # Set tshark path in wrapper if provided
         if tshark_path:
-            tshark_wrapper.config.tshark_path = tshark_path
+            from .. import config as app_config
+            app_config.config.tshark_path = tshark_path
     
     def __enter__(self):
         """Context manager entry."""

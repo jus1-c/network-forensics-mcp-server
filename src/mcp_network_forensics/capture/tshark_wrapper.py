@@ -361,19 +361,9 @@ def get_packet_detail(
         packet["dst_port"] = fields[9]
     
     if include_layers:
-        # Get detailed layer info via JSON output
-        json_stdout, _, json_rc = run_tshark(
-            pcap_file,
-            ["-Y", f"frame.number == {packet_index + 1}", "-T", "json"],
-            timeout=30
-        )
-        
-        if json_rc == 0 and json_stdout.strip():
-            try:
-                data = json.loads(json_stdout)
-                if data and len(data) > 0:
-                    packet["layers"] = list(data[0].get("_source", {}).get("layers", {}).keys())
-            except json.JSONDecodeError:
-                pass
+        # Parse layers from frame.protocols (colon-separated list)
+        if len(fields) > 2 and fields[2]:
+            # frame.protocols format: "eth:ip:tcp:http"
+            packet["layers"] = fields[2].split(':')
     
     return packet
