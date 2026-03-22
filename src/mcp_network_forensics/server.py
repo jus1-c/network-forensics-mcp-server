@@ -199,36 +199,17 @@ def get_protocol_statistics(
         
         logger.info(f"Getting protocol stats for {file_path}")
         
-        with FileCaptureManager(str(validated_path)) as capture:
-            total_packets = capture.get_total_packets()
-            
-            protocols = {}
-            total_bytes = 0
-            
-            for packet in capture.iter_packets(packet_limit=validated_limit):
-                proto = packet.highest_layer if hasattr(packet, 'highest_layer') else "Unknown"
-                protocols[proto] = protocols.get(proto, 0) + 1
-                
-                if hasattr(packet, 'length'):
-                    total_bytes += int(packet.length)
-            
-            stats = []
-            for proto, count in sorted(protocols.items(), key=lambda x: x[1], reverse=True):
-                stats.append({
-                    "protocol": proto,
-                    "count": count,
-                    "percentage": round(count / min(validated_limit, total_packets) * 100, 2),
-                })
-            
-            return json.dumps({
-                "status": "success",
-                "data": {
-                    "total_packets": total_packets,
-                    "analyzed_packets": min(validated_limit, total_packets),
-                    "total_bytes": total_bytes,
-                    "protocols": stats,
-                }
-            }, indent=2)
+        # Use tshark_wrapper directly for better performance
+        from .capture import tshark_wrapper
+        stats = tshark_wrapper.get_protocol_statistics(
+            str(validated_path),
+            packet_limit=validated_limit
+        )
+        
+        return json.dumps({
+            "status": "success",
+            "data": stats
+        }, indent=2)
             
     except Exception as e:
         logger.error(f"Error getting protocol statistics: {e}")
@@ -253,23 +234,18 @@ def extract_unique_ips(file_path: str) -> str:
         
         logger.info(f"Extracting unique IPs from {file_path}")
         
-        with FileCaptureManager(str(validated_path)) as capture:
-            src_ips = set()
-            dst_ips = set()
-            
-            for packet in capture.iter_packets():
-                if hasattr(packet, 'ip'):
-                    src_ips.add(packet.ip.src)
-                    dst_ips.add(packet.ip.dst)
-            
-            return json.dumps({
-                "status": "success",
-                "data": {
-                    "unique_source_ips": sorted(list(src_ips)),
-                    "unique_destination_ips": sorted(list(dst_ips)),
-                    "total_unique_ips": len(src_ips.union(dst_ips)),
-                }
-            }, indent=2)
+        # Use tshark_wrapper directly
+        from .capture import tshark_wrapper
+        src_ips, dst_ips = tshark_wrapper.get_unique_ips(str(validated_path))
+        
+        return json.dumps({
+            "status": "success",
+            "data": {
+                "unique_source_ips": src_ips,
+                "unique_destination_ips": dst_ips,
+                "total_unique_ips": len(set(src_ips + dst_ips)),
+            }
+        }, indent=2)
             
     except Exception as e:
         logger.error(f"Error extracting IPs: {e}")
