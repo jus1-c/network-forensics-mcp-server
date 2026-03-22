@@ -79,29 +79,99 @@ def run_tshark(
 def get_packet_count(pcap_file: str) -> int:
     """Get total packet count quickly.
     
+    Uses capinfos if available (fastest), otherwise falls back to
+    reading frame numbers.
+    
     Args:
         pcap_file: Path to PCAP file
         
     Returns:
         Number of packets
     """
+    # Try capinfos first (fastest - 0.6s vs 17s for io,phs)
+    try:
+        import shutil
+        capinfos = shutil.which("capinfos")
+        if capinfos:
+            kwargs = {}
+            if os.name == 'nt':
+                kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+            result = subprocess.run(
+                [capinfos, "-c", pcap_file],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                **kwargs
+            )
+            if result.returncode == 0:
+                # Parse "Number of packets:   1028 k" or "Number of packets = 1234"
+                for line in result.stdout.split('\n'):
+                    if 'number of packets' in line.lower():
+                        # Handle both "=" and ":" formats
+                        if '=' in line:
+                            count_str = line.split('=')[1].strip()
+                        else:
+                            count_str = line.split(':')[1].strip()
+                        # Remove 'k' suffix if present (means thousands)
+                        if 'k' in count_str.lower():
+                            count_str = count_str.lower().replace('k', '').strip()
+                            return int(float(count_str) * 1000)
+                        return int(count_str)
+    except Exception as e:
+        logger.debug(f"capinfos failed: {e}")
+        pass
+    
+    # Fallback: Get last frame number using tshark
+    logger.info("Falling back to tshark for packet count...")
+    stdout, stderr, rc = run_tshark(
+        pcap_file,
+        ["-n", "-T", "fields", "-e", "frame.number"],
+        timeout=120
+    )
+    
+    if rc != 0 or not stdout.strip():
+        logger.error(f"Failed to count packets: {stderr}")
+        return 0
+    
+    # Get the last frame number
+    lines = stdout.strip().split('\n')
+    if lines:
+        try:
+            # Last line should be the highest frame number
+            return int(lines[-1].strip())
+        except ValueError:
+            pass
+    
+    return len(lines)
+    
+    # Get the last frame number
+    lines = stdout.strip().split('\n')
+    if lines:
+        try:
+            # Last line should be the highest frame number
+            return int(lines[-1].strip())
+        except ValueError:
+            pass
+    
+    return len(lines)
+
+
+def _get_packet_count_io_phs(pcap_file: str) -> int:
+    """Fallback: Use io,phs statistics (slower)."""
     stdout, stderr, rc = run_tshark(
         pcap_file,
         ["-q", "-z", "io,phs"],
-        timeout=30
+        timeout=60
     )
     
     if rc != 0:
         logger.warning(f"tshark io,phs failed: {stderr}")
-        # Fallback: count manually
         return _count_packets_manual(pcap_file)
     
     # Parse output for frame count
-    # Look for line like "frames:1234 bytes:567890"
     for line in stdout.split('\n'):
         if 'frames:' in line.lower():
             try:
-                # Extract number after frames:
                 parts = line.split()
                 for part in parts:
                     if part.lower().startswith('frames:'):
