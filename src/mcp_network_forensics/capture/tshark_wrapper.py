@@ -228,6 +228,11 @@ def get_packets_summary(
         "-e", "udp.dstport",
     ]
     
+    # Add packet limit - much faster when we don't need all packets
+    if not display_filter:
+        # If no filter, we can use -c to stop after N packets
+        args.extend(["-c", str(packet_limit)])
+    
     if display_filter:
         args.extend(["-Y", display_filter])
     
