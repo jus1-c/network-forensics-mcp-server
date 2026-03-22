@@ -161,21 +161,16 @@ def test_protocol_statistics():
     try:
         validated_path = validate_file_path(file_path)
         
-        with FileCaptureManager(str(validated_path)) as capture:
-            total_packets = capture.get_total_packets()
-            
-            # Count protocols
-            protocols = {}
-            for packet in capture.iter_packets(packet_limit=1000):
-                proto = packet.highest_layer if hasattr(packet, 'highest_layer') else "Unknown"
-                protocols[proto] = protocols.get(proto, 0) + 1
-            
-            print(f"Protocol Distribution (first 1000 packets):")
-            print("-" * 60)
-            
-            for proto, count in sorted(protocols.items(), key=lambda x: x[1], reverse=True):
-                percentage = (count / min(1000, total_packets)) * 100
-                print(f"  {proto:20s}: {count:5d} ({percentage:5.2f}%)")
+        from mcp_network_forensics.capture import tshark_wrapper
+        stats = tshark_wrapper.get_protocol_statistics(str(validated_path), packet_limit=1000)
+        
+        print(f"Protocol Statistics:")
+        print("-" * 60)
+        print(f"Total packets: {stats['total_packets']}")
+        print(f"Total bytes: {stats['total_bytes']}")
+        print("\nTop protocols:")
+        for proto in stats['protocols'][:10]:
+            print(f"  {proto['protocol']:20s}: {proto['count']:5d} ({proto['percentage']:5.2f}%)")
         
         print("[OK] Test PASSED")
         return True
