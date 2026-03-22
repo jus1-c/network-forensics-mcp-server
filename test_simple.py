@@ -1,10 +1,9 @@
-"""Simple test script."""
+"""Simple test script for MCP Network Forensics Server."""
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+# Must install package first: pip install -e .
 
 from mcp_network_forensics.capture.file_capture import FileCaptureManager
+from mcp_network_forensics.capture import tshark_wrapper
 from mcp_network_forensics.utils.validators import validate_file_path
 
 file_path = r"C:\Users\Administrator\Documents\Python\Forensics_Tools\network-forensics-mcp-server\challenge.pcapng"
@@ -45,6 +44,17 @@ with FileCaptureManager(str(validated_path)) as capture:
     print(f"Layers ({len(detail.layers)}):")
     for layer in detail.layers:
         print(f"  - {layer.layer_name}")
+
+print("\n" + "=" * 60)
+print("Test 4: Protocol Statistics")
+print("=" * 60)
+
+stats = tshark_wrapper.get_protocol_statistics(str(validated_path), packet_limit=1000)
+print(f"Total packets: {stats['total_packets']}")
+print(f"Total bytes: {stats['total_bytes']}")
+print("\nTop protocols:")
+for proto in stats['protocols'][:10]:
+    print(f"  {proto['protocol']:20s}: {proto['count']:5d} ({proto['percentage']:5.2f}%)")
 
 print("\n" + "=" * 60)
 print("All tests passed!")
