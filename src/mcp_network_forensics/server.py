@@ -8,13 +8,6 @@ from mcp.server.fastmcp import FastMCP
 
 from .capture.file_capture import FileCaptureManager
 from .config import config
-from .models.packet import (
-    PCAPAnalysisResult,
-    FilterResult,
-    PacketDetail,
-    PacketSummary,
-    TrafficStatistics,
-)
 from .utils.validators import (
     validate_display_filter,
     validate_file_path,
@@ -46,15 +39,9 @@ def analyze_pcap_file(
         display_filter: Optional Wireshark display filter
         
     Returns:
-        JSON string with analysis results including:
-        - total_packets: Total packets in file
-        - analyzed_packets: Number of packets analyzed
-        - protocols: Protocol distribution
-        - sample_packets: Sample of packets with details
-        - file_path: Path to analyzed file
+        JSON with status and analysis results
     """
     try:
-        # Validate inputs
         validated_path = validate_file_path(file_path)
         validated_limit = validate_packet_limit(packet_limit, config.default_packet_limit)
         validated_filter = validate_display_filter(display_filter)
@@ -63,38 +50,30 @@ def analyze_pcap_file(
         
         with FileCaptureManager(str(validated_path)) as capture:
             total_packets = capture.get_total_packets()
-            
-            # Get packet summaries
             summaries = capture.get_summary(max_packets=validated_limit)
             
-            # Calculate protocol distribution
             protocols = {}
             for summary in summaries:
                 proto = summary.protocol
                 protocols[proto] = protocols.get(proto, 0) + 1
             
-            result = PCAPAnalysisResult(
-                success=True,
-                file_path=str(validated_path),
-                total_packets=total_packets,
-                analyzed_packets=len(summaries),
-                protocols=protocols,
-                sample_packets=summaries[:20],  # Return first 20 as samples
-                error_message=None,
-            )
-            
-            return json.dumps(result.model_dump(), indent=2, default=str)
+            return json.dumps({
+                "status": "success",
+                "data": {
+                    "file_path": str(validated_path),
+                    "total_packets": total_packets,
+                    "analyzed_packets": len(summaries),
+                    "protocols": protocols,
+                    "sample_packets": [s.model_dump() for s in summaries[:20]],
+                }
+            }, indent=2, default=str)
             
     except Exception as e:
         logger.error(f"Error analyzing PCAP: {e}")
-        result = PCAPAnalysisResult(
-            success=False,
-            file_path=file_path,
-            total_packets=0,
-            analyzed_packets=0,
-            error_message=str(e),
-        )
-        return json.dumps(result.model_dump(), indent=2, default=str)
+        return json.dumps({
+            "status": "error",
+            "message": str(e)
+        }, indent=2)
 
 
 @mcp.tool()
@@ -111,14 +90,7 @@ def get_packet_details(
         include_layers: Include detailed layer information (default: True)
         
     Returns:
-        JSON string with packet details including:
-        - index: Packet index
-        - timestamp: Packet timestamp
-        - protocol: Highest layer protocol
-        - length: Packet length
-        - src_ip, dst_ip: Source and destination IPs
-        - src_port, dst_port: Source and destination ports
-        - layers: Detailed layer information (if requested)
+        JSON with packet details or error
     """
     try:
         validated_path = validate_file_path(file_path)
@@ -133,20 +105,20 @@ def get_packet_details(
             
             if not detail:
                 return json.dumps({
-                    "success": False,
-                    "error": f"Packet {packet_index} not found"
+                    "status": "error",
+                    "message": f"Packet {packet_index} not found"
                 }, indent=2)
             
             return json.dumps({
-                "success": True,
-                "packet": detail.model_dump()
+                "status": "success",
+                "data": detail.model_dump()
             }, indent=2, default=str)
             
     except Exception as e:
         logger.error(f"Error getting packet details: {e}")
         return json.dumps({
-            "success": False,
-            "error": str(e)
+            "status": "error",
+            "message": str(e)
         }, indent=2)
 
 
@@ -170,7 +142,7 @@ def filter_packets(
         max_results: Maximum results to return (default: 100)
         
     Returns:
-        JSON string with filtered packets
+        JSON with filtered packets
     """
     try:
         validated_path = validate_file_path(file_path)
@@ -188,27 +160,23 @@ def filter_packets(
                 max_results=validated_limit
             )
             
-            result = FilterResult(
-                success=True,
-                total_matching=len(summaries),
-                returned_count=len(summaries),
-                packets=summaries,
-                filter_expression=validated_filter,
-                error_message=None,
-            )
-            
-            return json.dumps(result.model_dump(), indent=2, default=str)
+            return json.dumps({
+                "total_pages": 1,
+                "pages": [{
+                    "page": 1,
+                    "total_matching": len(summaries),
+                    "returned_count": len(summaries),
+                    "filter_expression": validated_filter,
+                    "packets": [s.model_dump() for s in summaries]
+                }]
+            }, indent=2, default=str)
             
     except Exception as e:
         logger.error(f"Error filtering packets: {e}")
-        result = FilterResult(
-            success=False,
-            total_matching=0,
-            returned_count=0,
-            filter_expression=display_filter,
-            error_message=str(e),
-        )
-        return json.dumps(result.model_dump(), indent=2, default=str)
+        return json.dumps({
+            "status": "error",
+            "message": str(e)
+        }, indent=2)
 
 
 @mcp.tool()
@@ -223,7 +191,7 @@ def get_protocol_statistics(
         packet_limit: Maximum packets to analyze (default: 1000)
         
     Returns:
-        JSON string with protocol statistics
+        JSON with protocol statistics
     """
     try:
         validated_path = validate_file_path(file_path)
@@ -234,7 +202,6 @@ def get_protocol_statistics(
         with FileCaptureManager(str(validated_path)) as capture:
             total_packets = capture.get_total_packets()
             
-            # Count protocols
             protocols = {}
             total_bytes = 0
             
@@ -245,7 +212,6 @@ def get_protocol_statistics(
                 if hasattr(packet, 'length'):
                     total_bytes += int(packet.length)
             
-            # Calculate percentages
             stats = []
             for proto, count in sorted(protocols.items(), key=lambda x: x[1], reverse=True):
                 stats.append({
@@ -255,18 +221,20 @@ def get_protocol_statistics(
                 })
             
             return json.dumps({
-                "success": True,
-                "total_packets": total_packets,
-                "analyzed_packets": min(validated_limit, total_packets),
-                "total_bytes": total_bytes,
-                "protocols": stats,
+                "status": "success",
+                "data": {
+                    "total_packets": total_packets,
+                    "analyzed_packets": min(validated_limit, total_packets),
+                    "total_bytes": total_bytes,
+                    "protocols": stats,
+                }
             }, indent=2)
             
     except Exception as e:
         logger.error(f"Error getting protocol statistics: {e}")
         return json.dumps({
-            "success": False,
-            "error": str(e)
+            "status": "error",
+            "message": str(e)
         }, indent=2)
 
 
@@ -278,7 +246,7 @@ def extract_unique_ips(file_path: str) -> str:
         file_path: Absolute path to PCAP file
         
     Returns:
-        JSON string with unique source and destination IPs
+        JSON with unique source and destination IPs
     """
     try:
         validated_path = validate_file_path(file_path)
@@ -295,17 +263,19 @@ def extract_unique_ips(file_path: str) -> str:
                     dst_ips.add(packet.ip.dst)
             
             return json.dumps({
-                "success": True,
-                "unique_source_ips": sorted(list(src_ips)),
-                "unique_destination_ips": sorted(list(dst_ips)),
-                "total_unique_ips": len(src_ips.union(dst_ips)),
+                "status": "success",
+                "data": {
+                    "unique_source_ips": sorted(list(src_ips)),
+                    "unique_destination_ips": sorted(list(dst_ips)),
+                    "total_unique_ips": len(src_ips.union(dst_ips)),
+                }
             }, indent=2)
             
     except Exception as e:
         logger.error(f"Error extracting IPs: {e}")
         return json.dumps({
-            "success": False,
-            "error": str(e)
+            "status": "error",
+            "message": str(e)
         }, indent=2)
 
 

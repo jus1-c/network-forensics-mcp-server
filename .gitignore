@@ -151,3 +151,5 @@ tests/fixtures/*.pcap.gz
 tmp/
 temp/
 *.tmp
+# Misc
+.ignore
