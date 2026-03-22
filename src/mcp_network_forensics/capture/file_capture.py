@@ -1,5 +1,6 @@
 """File capture module for PyShark."""
 
+import asyncio
 import logging
 from contextlib import contextmanager
 from pathlib import Path
@@ -13,6 +14,16 @@ from ..models.packet import PacketDetail, PacketSummary
 from ..utils.formatters import format_timestamp
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_event_loop():
+    """Ensure an event loop exists for the current thread."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No event loop in this thread, create one
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
 
 class FileCaptureManager:
@@ -40,6 +51,9 @@ class FileCaptureManager:
     def open(self) -> None:
         """Open the capture file."""
         try:
+            # Ensure event loop exists
+            _ensure_event_loop()
+            
             self._capture = pyshark.FileCapture(
                 str(self.file_path),
                 keep_packets=config.keep_packets,

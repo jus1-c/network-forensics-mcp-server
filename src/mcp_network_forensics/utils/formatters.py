@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Union
 import pyshark
 
 
-def format_timestamp(ts: datetime) -> str:
+def format_timestamp(ts: datetime) -> Optional[str]:
     """Format timestamp to ISO string."""
     return ts.isoformat() if ts else None
 
