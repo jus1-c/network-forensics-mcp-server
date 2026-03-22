@@ -449,3 +449,136 @@ def get_packet_detail(
             packet["layers"] = fields[2].split(':')
     
     return packet
+
+
+def extract_fields(
+    pcap_file: str,
+    fields: List[str],
+    display_filter: Optional[str] = None,
+    packet_limit: Optional[int] = None
+) -> List[Dict[str, str]]:
+    """Extract arbitrary fields from packets.
+    
+    Allows querying any field supported by tshark/wireshark.
+    Common fields:
+    - frame.*: frame.number, frame.time, frame.len
+    - eth.*: eth.src, eth.dst, eth.type
+    - ip.*: ip.src, ip.dst, ip.proto, ip.ttl
+    - tcp.*: tcp.srcport, tcp.dstport, tcp.flags, tcp.seq
+    - udp.*: udp.srcport, udp.dstport
+    - dns.*: dns.qry.name, dns.qry.type, dns.resp.name
+    - http.*: http.request.uri, http.host, http.request.method
+    - tls.*: tls.handshake.extensions_server_name
+    - data.data: Raw payload data
+    
+    Args:
+        pcap_file: Path to PCAP file
+        fields: List of field names (e.g., ["dns.qry.name", "http.host"])
+        display_filter: Optional Wireshark display filter
+        packet_limit: Maximum packets to return
+        
+    Returns:
+        List of dictionaries with extracted field values
+    """
+    if not fields:
+        raise ValueError("At least one field must be specified")
+    
+    # Build tshark arguments
+    args = ["-n", "-T", "fields"]
+    
+    # Add all requested fields
+    for field in fields:
+        args.extend(["-e", field])
+    
+    # Add display filter if specified
+    if display_filter:
+        args.extend(["-Y", display_filter])
+    
+    # Add packet limit for unfiltered queries
+    if packet_limit and not display_filter:
+        args.extend(["-c", str(packet_limit)])
+    
+    stdout, stderr, rc = run_tshark(
+        pcap_file,
+        args,
+        timeout=120
+    )
+    
+    if rc != 0:
+        raise CaptureError(f"tshark failed: {stderr}")
+    
+    results = []
+    for i, line in enumerate(stdout.strip().split('\n')):
+        if packet_limit and i >= packet_limit:
+            break
+        
+        values = line.split('\t')
+        result = {}
+        
+        for idx, field in enumerate(fields):
+            if idx < len(values):
+                result[field] = values[idx] if values[idx] else None
+            else:
+                result[field] = None
+        
+        results.append(result)
+    
+    return results
+
+
+def extract_payload(
+    pcap_file: str,
+    packet_index: Optional[int] = None,
+    display_filter: Optional[str] = None,
+    max_packets: int = 100
+) -> List[Dict]:
+    """Extract raw payload data from packets.
+    
+    Args:
+        pcap_file: Path to PCAP file
+        packet_index: Specific packet index (optional)
+        display_filter: Filter to apply (optional)
+        max_packets: Maximum packets to extract
+        
+    Returns:
+        List of dicts with packet info and payload
+    """
+    args = [
+        "-n",
+        "-T", "fields",
+        "-e", "frame.number",
+        "-e", "frame.protocols",
+        "-e", "data.data",  # Raw payload
+    ]
+    
+    if packet_index is not None:
+        args.extend(["-Y", f"frame.number == {packet_index + 1}"])
+    elif display_filter:
+        args.extend(["-Y", display_filter])
+    
+    if not display_filter and not packet_index:
+        args.extend(["-c", str(max_packets)])
+    
+    stdout, stderr, rc = run_tshark(
+        pcap_file,
+        args,
+        timeout=120
+    )
+    
+    if rc != 0:
+        raise CaptureError(f"tshark failed: {stderr}")
+    
+    results = []
+    for i, line in enumerate(stdout.strip().split('\n')):
+        if i >= max_packets:
+            break
+        
+        fields = line.split('\t')
+        if len(fields) >= 3:
+            results.append({
+                "index": int(fields[0]) - 1 if fields[0].isdigit() else i,
+                "protocols": fields[1] if len(fields) > 1 else "",
+                "payload_hex": fields[2] if len(fields) > 2 else None,
+            })
+    
+    return results

@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Optional
+from typing import List, Optional
 
 from mcp.server.fastmcp import FastMCP
 
@@ -249,6 +249,123 @@ def extract_unique_ips(file_path: str) -> str:
             
     except Exception as e:
         logger.error(f"Error extracting IPs: {e}")
+        return json.dumps({
+            "status": "error",
+            "message": str(e)
+        }, indent=2)
+
+
+@mcp.tool()
+def extract_packet_fields(
+    file_path: str,
+    fields: List[str],
+    display_filter: Optional[str] = None,
+    packet_limit: Optional[int] = 100
+) -> str:
+    """Extract arbitrary fields from packets.
+    
+    Query any field supported by tshark/wireshark. Useful for extracting
+    protocol-specific data like DNS queries, HTTP headers, TLS SNI, etc.
+    
+    Common fields:
+    - DNS: dns.qry.name, dns.qry.type, dns.resp.name, dns.resp.type
+    - HTTP: http.request.uri, http.host, http.request.method, http.user_agent
+    - TLS: tls.handshake.extensions_server_name (SNI)
+    - TCP: tcp.flags, tcp.seq, tcp.ack
+    - IP: ip.ttl, ip.id, ip.flags
+    - Frame: frame.time_delta, frame.cap_len
+    - Data: data.data (raw payload in hex)
+    
+    Args:
+        file_path: Absolute path to PCAP file
+        fields: List of field names (e.g., ["dns.qry.name", "dns.qry.type"])
+        display_filter: Optional Wireshark display filter
+        packet_limit: Maximum packets to return (default: 100)
+        
+    Returns:
+        JSON with extracted field values
+    """
+    try:
+        validated_path = validate_file_path(file_path)
+        validated_limit = validate_packet_limit(packet_limit, 100)
+        
+        if not fields:
+            return json.dumps({
+                "status": "error",
+                "message": "At least one field must be specified"
+            }, indent=2)
+        
+        logger.info(f"Extracting fields {fields} from {file_path}")
+        
+        from .capture import tshark_wrapper
+        results = tshark_wrapper.extract_fields(
+            str(validated_path),
+            fields=fields,
+            display_filter=display_filter,
+            packet_limit=validated_limit
+        )
+        
+        return json.dumps({
+            "status": "success",
+            "data": {
+                "fields": fields,
+                "count": len(results),
+                "results": results
+            }
+        }, indent=2)
+        
+    except Exception as e:
+        logger.error(f"Error extracting fields: {e}")
+        return json.dumps({
+            "status": "error",
+            "message": str(e)
+        }, indent=2)
+
+
+@mcp.tool()
+def extract_packet_payload(
+    file_path: str,
+    packet_index: Optional[int] = None,
+    display_filter: Optional[str] = None,
+    max_packets: int = 10
+) -> str:
+    """Extract raw payload data from packets.
+    
+    Extracts the raw data payload in hexadecimal format.
+    Useful for analyzing binary protocols, extracting files, or debugging.
+    
+    Args:
+        file_path: Absolute path to PCAP file
+        packet_index: Specific packet index (0-based, optional)
+        display_filter: Filter to apply (e.g., "tcp.port == 80", optional)
+        max_packets: Maximum packets to extract (default: 10)
+        
+    Returns:
+        JSON with packet indices and payload data in hex
+    """
+    try:
+        validated_path = validate_file_path(file_path)
+        
+        logger.info(f"Extracting payload from {file_path}")
+        
+        from .capture import tshark_wrapper
+        results = tshark_wrapper.extract_payload(
+            str(validated_path),
+            packet_index=packet_index,
+            display_filter=display_filter,
+            max_packets=max_packets
+        )
+        
+        return json.dumps({
+            "status": "success",
+            "data": {
+                "count": len(results),
+                "packets": results
+            }
+        }, indent=2)
+        
+    except Exception as e:
+        logger.error(f"Error extracting payload: {e}")
         return json.dumps({
             "status": "error",
             "message": str(e)
